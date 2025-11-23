@@ -1,5 +1,7 @@
-import { Prisma,BookingStatus } from "@prisma/client";
+import { Prisma,BookingStatus,IdempotantyKey } from "@prisma/client";
 import PrismaClient from "../prisma/client";
+import {validate as isValidUUID} from "uuid";
+import { BadRequestError } from "../utils/errors/app.error";
 
 export async function createBooking(bookingInput:Prisma.BookingCreateInput) {
     const booking=await PrismaClient.booking.create({
@@ -12,7 +14,7 @@ export async function createBooking(bookingInput:Prisma.BookingCreateInput) {
 export async function createIdempotantyKey(key:string,bookingId:number){
     const idempotantyKeyResponse=await PrismaClient.idempotantyKey.create({
         data:{
-            key:key,
+            idempotantyKey:key,
             booking:{
                 connect:{id:bookingId}
             }
@@ -32,8 +34,8 @@ export async function getBookingById(bookingId:number){
 
 }
 
-export async function confirmBooking(bookingId:number) {
-    const booking=await PrismaClient.booking.update({
+export async function confirmBooking(txn:Prisma.TransactionClient,bookingId:number) {
+    const booking=await txn.booking.update({
         where:{
             id:bookingId
         },
@@ -57,10 +59,10 @@ export async function cancelBooking(bookingId:number) {
 }
 
 
-export async function finilizeIdempotantyKey(key:string){
-    const idempotantyKey=await PrismaClient.idempotantyKey.update({
+export async function finilizeIdempotantyKey(txn:Prisma.TransactionClient,key:string){
+    const idempotantyKey=await txn.idempotantyKey.update({
         where:{
-            key:key
+            idempotantyKey:key
         },
         data:{
             finalized:true
@@ -69,11 +71,22 @@ export async function finilizeIdempotantyKey(key:string){
     return idempotantyKey;
 }
 
-export async function getIdempotantyKey(key:string){
-    const idempotantyKey=await PrismaClient.idempotantyKey.findUnique({
-        where:{
-            key:key
-        }
-    });
-    return idempotantyKey;
+export async function getIdempotantyKeyWithLock(txn:Prisma.TransactionClient,key:string){
+    if(!isValidUUID(key)){
+        throw new BadRequestError("idempotantey key format is not UUID");
+    }
+    // const idempotantyKey=await txn.idempotantyKey.findUnique({
+    //     where:{
+    //         key:key
+    //     },
+        
+    // });
+    const idempotantyKey:Array<IdempotantyKey>=await txn.$queryRaw`
+    SELECT * FROM IdempotantyKey WHERE idempotantyKey=${key} FOR UPDATE;
+    `;
+    if(idempotantyKey==null || idempotantyKey.length==0){
+        return null;
+    }
+    return idempotantyKey[0];
 }
+

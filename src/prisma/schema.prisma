@@ -34,7 +34,7 @@ enum BookingStatus {
 
 model IdempotantyKey{
   id  Int @id @default(autoincrement())
-  key String  @unique
+  idempotantyKey String  @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   bookingId Int @unique
