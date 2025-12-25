@@ -1,25 +1,41 @@
 import {confirmBooking, createBooking,createIdempotantyKey, finilizeIdempotantyKey, getIdempotantyKeyWithLock} from "../reposatory/booking.reposatory";
 import {CreateBookingDTO} from "../dto/booking.dto";
 import generateIdepotanteyKey from "../utils/helpers/generateIdepotanteyKey";
-import {BadRequestError} from "../utils/errors/app.error";
+import {BadRequestError, InternalServerError} from "../utils/errors/app.error";
 import PrismaClient from "../prisma/client";
+import { redlock} from "../config/redis.config";
+import { serverConfig } from "../config";
+
 
 
 export async function createBookingService(createBookingDTO:CreateBookingDTO){
-    const booking=await createBooking({
-        userId:createBookingDTO.userId,
-        hotelId:createBookingDTO.hotelId,
-        bookingAmmount:createBookingDTO.bookingAmount,
-        totalGuests:createBookingDTO.totalGuest
-    });
+    const ttl=Number(serverConfig.LOCK_TTL);
+    const bookingResource=`hotelid:${createBookingDTO.hotelId}`;
+    // console.log( "🤣",bookingResource,ttl);
+    try{
+        await redlock.acquire([bookingResource],ttl);
+        
+        const booking=await createBooking({
+                    userId:createBookingDTO.userId,
+                    hotelId:createBookingDTO.hotelId,
+                    bookingAmmount:createBookingDTO.bookingAmount,
+                    totalGuests:createBookingDTO.totalGuest
+             });
 
-    const idempotantyKey=await generateIdepotanteyKey();
-    await createIdempotantyKey(idempotantyKey,booking.id);
+            const idempotantyKey=await generateIdepotanteyKey();
+            await createIdempotantyKey(idempotantyKey,booking.id);
 
-    return {
-        bookingId:booking.id,
-        idempotantyKey
+            return {
+                bookingId:booking.id,
+                idempotantyKey
+            }
     }
+    catch(error){
+
+            throw new InternalServerError("This resourse is busy, you can try it later");
+            
+        }
+      
 
 }
 
